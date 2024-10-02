@@ -6,7 +6,7 @@ use brontes_metrics::inspectors::OutlierMetrics;
 use brontes_types::{
     collect_address_set_for_accounting,
     db::dex::PriceAt,
-    mev::{Bundle, JitLiquidity, MevType},
+    mev::{Bundle,  MevType},
     normalized_actions::{
         accounting::ActionAccounting, NormalizedBurn, NormalizedCollect, NormalizedMint, NormalizedNewPool, NormalizedPoolConfigUpdate
     },

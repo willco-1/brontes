@@ -5,6 +5,7 @@ pub mod jit;
 pub mod liquidations;
 pub mod sandwich;
 pub mod searcher_activity;
+pub mod launch_snipe;
 pub mod shared_utils;
 
 use malachite::Rational;

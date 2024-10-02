@@ -137,7 +137,7 @@ impl InsertRow for Action {
             Action::Liquidation(_) => NormalizedLiquidation::COLUMN_NAMES,
             Action::SelfDestruct(_) => todo!("joe pls dome this"),
             Action::EthTransfer(_) => todo!("joe pls dome this"),
-            Action::NewPool(_) => todo!(),
+            Action::NewPool(_) => todo!("this is just for inserting rows"),
             Action::PoolConfigUpdate(_) => todo!(),
             Action::Unclassified(..) | Action::Revert => panic!(),
             Action::Aggregator(_) => NormalizedAggregator::COLUMN_NAMES,

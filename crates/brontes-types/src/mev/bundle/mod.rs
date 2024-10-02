@@ -102,6 +102,7 @@ pub enum MevType {
     Liquidation,
     AtomicArb,
     SearcherTx,
+    LaunchSnipe,
     #[default]
     Unknown,
 }
@@ -115,6 +116,7 @@ impl MevType {
             | MevType::AtomicArb
             | MevType::Liquidation
             | MevType::SearcherTx
+            | MevType::LaunchSnipe
             | MevType::Unknown => false,
             MevType::CexDexRfq
             | MevType::CexDexTrades
@@ -135,6 +137,7 @@ impl MevType {
             MevType::JitSandwich => "jit-sandwich",
             MevType::SearcherTx => "searcher-tx",
             MevType::Liquidation => "liquidation",
+            MevType::LaunchSnipe => "launch-snipe",
             MevType::Unknown => "header",
         }
     }
@@ -154,6 +157,7 @@ impl From<String> for MevType {
             "JitSandwich" => MevType::JitSandwich,
             "AtomicArb" => MevType::AtomicArb,
             "SearcherTx" => MevType::SearcherTx,
+            "LaunchSnipe" => MevType::LaunchSnipe,
             _ => MevType::Unknown,
         }
     }
