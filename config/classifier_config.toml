@@ -193,3 +193,8 @@ init_block = 13397058
 
 # [PropellerLabsSolver."0x14f2b6ca0324cd2B013aD02a7D85541d215e2906"]
 # init_block = 19025601
+
+# Banana Gun Router
+[BananaGun. "0xdB5889E35e379Ef0498aaE126fc2CCE1fbD23216"]
+init_block = 18721323
+# not the actual init block but for testing
