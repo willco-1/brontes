@@ -196,5 +196,14 @@ init_block = 13397058
 
 # Banana Gun Router
 [BananaGun. "0xdB5889E35e379Ef0498aaE126fc2CCE1fbD23216"]
-init_block = 18721323
-# not the actual init block but for testing
+
+# maestro router
+[Maestro. "0x4B8c0A0df725750aeb948816B4dffeCD32ee900"]
+
+[Maestro2. "0x80a64c6D7f12C47B7c66c5B4E20E72bc1FCd5d9e"]
+#Sigma Router
+[Sigma. "0x628c171eD21ec016b3696288570209ab07917bB4"]
+
+# Looter Router
+[Looter. "0xF268035F5F7Fa5BD43Eb8b84723D880Ec2748D81"]
+

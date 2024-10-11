@@ -22,46 +22,27 @@ use crate::{
     MAX_PROFIT, MIN_PROFIT,
 };
 pub struct PossibleLaunchSnipe {
-    pub is_new_lp: bool,
-    pub new_lp: NormalizedNewPool,
-    pub initial_liquidity: Option<U256>, // Total initial liquidity added
-    pub first_trade_tx: Option<B256>,
-    pub first_trade_time: Option<u64>, // Timestamp of the first trade
-    pub first_trade_amount: Option<U256>, // Amount traded in the first transaction
-    pub snipe_trader: Option<Address>,   // Address of the trader performing the snipe
-    pub tokens_involved: Vec<Address>,   // Addresses of tokens in the pool
-    pub pool_type: String,               // e.g., "UniswapV2", "UniswapV3"
-    pub price_impact: Option<f64>,       // Price impact of the first trade
-    pub slippage: Option<f64>,
+
+
 
 }
 
 pub struct PossibleLaunchSnipeInfo {
-    pub lp_creation_info: TxInfo,
-    pub first_trade_info: Option<TxInfo>,
-    pub snipe_info: Option<TxInfo>,
-    pub inner: PossibleLaunchSnipe,
+
 }
 impl PossibleLaunchSnipeInfo {
-    pub fn from_launch_snipe(ps: PossibleLaunchSnipe, info_set: &FastHashMap<B256, TxInfo>) -> Option<Self> {
-      // TODO: Impl this later
-        }
-        Some(PossibleLaunchSnipeInfo {
-            lp_creation_info,
-            first_trade_info,
-            snipe_info,
-            inner: ps,
-        });
-    }
 
-
+}
 
 pub struct LaunchSnipeInspector< 'db, DB: LibmdbxReader> {
     pub utils: SharedInspectorUtils<'db, DB>
 
 
 }
-
+impl<'db, DB: LibmdbxReader> LaunchSnipeInspector<'db, DB> {
+    pub fn new(quote: Address, db: &'db DB, metrics: Option<OutlierMetrics>) -> Self {
+        Self { utils: SharedInspectorUtils::new(quote, db, metrics) }
+    }
 impl <Db, LibmdbxReader> Inspector for LaunchSnipeInspector<'_, DB> {
 type Result = Vec<Bundle>;
     fn get_id(&self) -> &str {
@@ -72,76 +53,124 @@ type Result = Vec<Bundle>;
     }
 
     fn inspect_block(&self, data: MultiBlockData) -> Self::Result {
-        let BlockData  { metadata, tree } = data.get_most_recent_block();
-        let ex = || {
-            let (creation, tx): (Vec<_>, Vec<_>) = tree
-                .clone()
-                .collect_all(TreeSearchBuilder::default().with_actions([
-                    Action::is_new_pool,
-                    Action::is_transfer,
-                    Action::is_eth_transfer,
-                    // TODO: must need swaps here too , need to test
-                ]))
-                .unzip();
-        let tx_info = tree.get_tx_info_batch(&tx, self.utils.db);
 
-        multizip((creation, tx_info))
-            .filter_map(|tx, info)| {
-             let info = info?;
-             let actions = self
-             .utils
-             .flatten_nested_actions_defualt(tx.into_iter())
-             .collect::<Vec<_>>();
+    let BlockData { metadata, tree } = data.get_most_recent_block();
 
-            self.calcualte_snipe_impact(info, metadata.clone(), actions)
-        })
-        .collect::<Vec<_>>()
-    };
+
+    // Run the extraction process within a metrics context or fall back to default
     self.utils
         .get_metrics()
-        .map(|m| m.run_inspector(MevType::LaunchSnipe, ex))
-        .unwrap_or_else(ex)
-        }
+        .map(|m| m.run_inspector(MevType::LaunchSnipe, extract_snipe_info))
+        .unwrap_or_else(extract_snipe_info)
+}
+fn inspect_block_inner(
+        &self,
+        tree: Arc<BlockTree<Action>>,
+        metadata: Arc<MetaData>,
+   ) -> Vec<Bundle> {
+            self.possible_snipe_set(tree.clone())
+                    .into_iter()
+                    .filter_map(
+                    |PossibleSnipeWithInfo {
+                    inner: PossibleSnipe {}
+                    router,
+                    swaps,
+                    tranfers,
+            }| {
+                let sniper_actions = self.get_sniper_actions()
+            );
+            if sniper_actions.is_empty() {
+                tracing::trace!("no sniper actions found");
+                return None
+            }
+
+            self.calculate_snipe(
+            )
+        },
+    )
+    .flatten()
+    .collect::<Vec<_>>()
+  }
+
+fn get_sniper_actions<'a>(
+        &self,
+        i: impl Iterator<Item = &'a TxHash>,
+        tree: Arc<BlockTree<Action>>,
+    ) -> Vec<Vec<Action>> {
+        i.map(|tx| {
+            self.utils
+                .flatten_nested_actions(
+                    tree.clone().collect(
+                        tx,
+                        TreeSearchBuilder::default().with_actions([
+                            Action::is_mint,
+                            Action::is_swap,
+                            Action::is_eth_transfer,
+                            Action::is_nested_action,
+                        ]),
+                    ),
+                    &|actions| {
+                        actions.is_mint()
+                            || actions.is_burn()
+                            || actions.is_collect()
+                            || actions.is_transfer()
+                            || actions.is_eth_transfer()
+                    },
+                )
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<Vec<Action>>>()
+    }
+
+    }
+fn calculate_recursive(
+    info: &[TxInfo],
+    sniper_actions: &[Vec<Action>],
+    large_swap_threshold: f64, // Pass the threshold as a parameter instead of a constant
+) -> Option<bool> {
+    let front_is_mint_back_is_multi_transfer = sniper_actions.last()?.iter()
+            .any(|h|is_eth_transfer())
+            || sniper_actions
+                .iter()
+                .take(sniper_actions.len() -1)
+                .all(|h| h.iter().any(|a| a.is_mint()));
+      let matching_eoas  =
+      let m = sniper_actions.first()?;
+        let Some(Action::Mint(mint)) = m.iter().find(|m| m.is_mint()) else { return Some(false) };
+        let l = sniper_actions.last()?;
+        let Some(Action::EthTransfer(transfer)) = l.iter().find(
+
+
+        Some(!front_is_mint_back_is_multi_transfer || !matching_eoas || !mint_burn_eq)
+
     }
 
 
-impl< DB: LibmdbxReader> LaunchSnipeInspector<'_, DB> {
-    fn calculate_snipe_impact(&self, info: TxInfo, metadata: Arc<Metadata>, mut actions: Vec<Action>) -> Option<Bundle> {
-        // Separate swap actions from others, assuming swaps are key for detecting snipes
-        let (swaps, others): (Vec<_>, Vec<_>) = actions.drain(..).partition(|a| a.is_swap());
 
-        if swaps.is_empty() {
-            tracing::debug!("No swap events detected for LP snipe analysis");
-            return None;
-        }
 
-        // Collect addresses involved in MEV, potentially from swaps or other actions
-        let mev_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
 
-        // Calculate deltas for actions, focusing on transfers and ETH transfers for simplicity
-        let deltas = others
-            .into_iter()
-            .chain(info.get_total_eth_value().iter().cloned().map(Action::from))
-            .filter(|a| a.is_eth_transfer() || a.is_transfer())
-            .account_for_actions();
 
-        let (rev, mut has_dex_price) = if let Some(rev) = self.utils.get_deltas_usd(
-            info.tx_index,
-            PriceAt::After,
-            &mev_addresses,
-            &deltas,
-            }
+    }
+
+
+fn calculate_snipe(&self,
+    sniper_actions: Vec<Vec<Action>>,
+    metadata: Arc<Metadata>,
+    victimized_pool: NormalizedNewPoool,
+    txs: Vec<Vec<TxInfo>>,
+    ) -> Option<Vec<Bundle>> {
+    }
+
+fn ensure_valid_structure() {}
+
+fn recursive_possible_snipes() {}
+
+fn get_bribes() {} //maybe
+
+fn get_victimized_pool() {}
+
+fn calculate_price_impact () {}
+fn calculate_profit () {}
+
+
 }
-//
-//
-//
-//fn recursive_possible_ls() -> Option<Vec<Bundle>> {
-//}
-//
-//
-//fn detect_new_lp() -> Option<NormalizedNewPool> //?? {
-//}
-//
-//fn get_snipe_actions() -> Option<Vec<Vec<Action>>> {}
-//
-
