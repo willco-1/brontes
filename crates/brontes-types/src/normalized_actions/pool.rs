@@ -35,3 +35,29 @@ pub struct NormalizedPoolConfigUpdate {
     pub pool_address: Address,
     pub tokens:       Vec<Address>,
 }
+
+pub struct ClickhouseNormalizedNewPool {
+    pub trace_index:  Vec<u64>,
+    pub protocol: Vec<String>,
+    pub pool_address: Vec<String>,
+    pub tokens:       Vec<String>,
+}
+
+impl TryFrom<Vec<NormalizedNewPool>> for ClickhouseNormalizedNewPool {
+
+    type Error = eyre::Report;
+
+    fn try_from(value: Vec<NormalizedNewPool>) -> eyre::Result<Self> {
+        Ok(ClickhouseNormalizedNewPool {
+            trace_index: value.iter().map(|val| val.trace_index).collect(),
+            protocol: value.iter().map(|val| format!("{:?}", val.protocol)).collect(),
+            pool_address: value.iter().map(|val| format!("{:?}", val.pool_address)).collect(),
+            tokens: value
+                .iter()
+                .map(|val| val.tokens.iter().map(|t| t.clickhouse_fmt()).collect_vec())
+                .collect(),
+
+            })
+        }
+}
+

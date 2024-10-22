@@ -60,56 +60,86 @@ impl<DB: LibmdbxReader> Inspector for LaunchSnipeInspector<'_, DB> {
         let BlockData { metadata, tree } = block;
 
         let ex = || {
-            let (tx, snipes): (Vec<_>, Vec<_>) = tree
-                .clone()
+
+            tree.clone()
                 .collect_all(TreeSearchBuilder::default().with_actions([
                     Action::is_new_pool,
                     Action::is_swap,
                     Action::is_transfer,
                     Action::is_eth_transfer,
+                    Action::is_nested_action,
                 ]))
-                .unzip();
+                .t_full_map(|(tree, v)| {
+                    let (tx_hashes, v): (Vec<_>, Vec<_>) = v.unzip();
+                    (
+                        tree.get_tx_info_batch(&tx_hashes, self.utils.db),
+                        v.into_iter().map(|v| {
+                            self.utils
+                                .flatten_nested_actions_default(v.into_iter())
+                                .collect::<Vec<_>>()
+                        }),
+                    )
+                })
+                .into_zip()
+                .filter_map(|(info, action)| {
+                    let info = info??;
+                    let actions = action?;
 
-            let tx_info = tree.get_tx_info_batch(&tx, self.utils.db);
-
-            multizip((snipes, tx_info))
-                .filter_map(|(snipes, info)| {
-                    let info = info?;
-                    let actions = self
-                        .utils
-                        .flatten_nested_actions_default(snipes.into_iter())
-                        .collect::<Vec<_>>();
-
-                    self.calculate_snipe(info, metadata.clone(), actions)
+                    self.possible_snipe_set(
+                        data.per_block_data
+                            .iter()
+                            .map(|inner| inner.tree.clone())
+                            .collect_vec(),
+                        info,
+                        metadata.clone(),
+                        actions
+                            .into_iter()
+                            .split_actions::<(Vec<_>, Vec<_>, Vec<_>), _>((
+                                Action::try_swaps_merged,
+                                Action::try_transfer,
+                                Action::try_eth_transfer,
+                            )),
+                    )
                 })
                 .collect::<Vec<_>>()
         };
 
         self.utils
             .get_metrics()
-            .map(|m| m.run_inspector(MevType::LaunchSnipe, ex))
-            .unwrap_or_else(ex)
+            .map(|m| m.run_inspector(MevType::LaunchSnipe, execution))
+            .unwrap_or_else(&execution)
     }
 }
 
 impl<DB: LibmdbxReader> LaunchSnipeInspector<'_, DB> {
-    fn calculate_snipe(
-        &self,
+     fn possible_snipe_set(
+         &self,
+        trees: Vec<Arc<BlockTree<Action>>>,
         info: TxInfo,
         metadata: Arc<Metadata>,
-        actions: Vec<Action>,
+        data: (NormalizedNewPool, Vec<NormalizedSwap>, Vec<NormalizedTransfer>, Vec<NormalizedEthTransfer>),
     ) -> Option<Bundle> {
-        let (swaps, transfers): (Vec<_>, Vec<_>) = actions
-            .clone()
+         tracing::trace!(?info, "sniping");
+        let (mut pool, swaps, transfers, eth_transfers) = data;
+        let router_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
+
+        let mut ignore_addresses = router_addresses.clone();
+
+        swaps.iter().for_each(|s| {
+            router_addresses.insert(s.swaps);
+        });
+
+        swaps.extend(self.utils.try_create_swaps(&transfers, router__addresses));
+
+
+        let account_deltas = transfers
             .into_iter()
-            .action_split((Action::try_swaps_merged, Action::force_transfer));
+            .map(Action::from)
+            .chain(eth_transfers.into_iter().map(Action::from))
+            .chain(info.get_total_eth_value().iter().cloned().map(Action::from))
+            .account_for_actions();
 
-        if swaps.is_empty() {
-            tracing::debug!("no sniping events");
-            return None;
-        }
-
-        let mev_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
+        let router_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
 
         let deltas = actions
             .into_iter()
@@ -120,7 +150,7 @@ impl<DB: LibmdbxReader> LaunchSnipeInspector<'_, DB> {
         let (rev, mut has_dex_price) = if let Some(rev) = self.utils.get_deltas_usd(
             info.tx_index,
             PriceAt::After,
-            &mev_addresses,
+            &router_addresses,
             &deltas,
             metadata.clone(),
             false,
@@ -163,15 +193,13 @@ impl<DB: LibmdbxReader> LaunchSnipeInspector<'_, DB> {
             },
         );
 
-        let new_snipe = LaunchSnipe {
-            block_number: metadata.block_num,
-            snipe_tx_hash: info.tx_hash,
-            trigger: b256!(),
-            snipe_swaps: swaps,
-            mints,
-            gas_details: info.gas_details,
+        let new_snipe = PossibleLaunchSnipe {
+            router: todo!(),
+            affected_pool: todo!(),
+            swaps_in: todo!(),
+            swaps_out: todo!(),
+            victims: todo!(),
         };
-
         Some(Bundle { header, data: BundleData::LaunchSnipe(new_snipe) })
     }
 }
