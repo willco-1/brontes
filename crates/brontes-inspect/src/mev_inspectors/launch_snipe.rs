@@ -29,11 +29,8 @@ const LARGE_SWAP_THRESHOLD: U256 = U256::from(1_000_000);
 pub struct PossibleLaunchSnipe {
     pub router: Address,
     pub affected_pool: Address,
-    pub swaps_in: Vec<B256>,
-    pub swaps_out: Vec<B256>,
-
-    pub victims: Vec<Address> // the true victim is the pool itself,
-    // but buyers who are swapping into the pool after will suffer
+    pub swaps: Vec<B256>,
+    pub transfers: Vec<B256>,
     }
 
 pub struct PossibleLaunchSnipeInfo {
@@ -113,94 +110,96 @@ impl<DB: LibmdbxReader> Inspector for LaunchSnipeInspector<'_, DB> {
 
 impl<DB: LibmdbxReader> LaunchSnipeInspector<'_, DB> {
      fn possible_snipe_set(
-         &self,
-        trees: Vec<Arc<BlockTree<Action>>>,
-        info: TxInfo,
-        metadata: Arc<Metadata>,
-        data: (NormalizedNewPool, Vec<NormalizedSwap>, Vec<NormalizedTransfer>, Vec<NormalizedEthTransfer>),
-    ) -> Option<Bundle> {
-         tracing::trace!(?info, "sniping");
-        let (mut pool, swaps, transfers, eth_transfers) = data;
-        let router_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
+    &self,
+    trees: Vec<Arc<BlockTree<Action>>>,
+    info: TxInfo,
+    metadata: Arc<Metadata>,
+    data: (NormalizedNewPool, Vec<NormalizedSwap>, Vec<NormalizedTransfer>, Vec<NormalizedEthTransfer>),
+) -> Option<Bundle> {
+    tracing::trace!(?info, "sniping snipers");
 
-        let mut ignore_addresses = router_addresses.clone();
+    let (mut pool, swaps, transfers, eth_transfers) = data;
 
-        swaps.iter().for_each(|s| {
-            router_addresses.insert(s.swaps);
-        });
+    // Collect initial router addresses for accounting
+    let mut router_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
 
-        swaps.extend(self.utils.try_create_swaps(&transfers, router__addresses));
+    // Add addresses from the swaps to the router addresses set (focus on "from" and "to")
+    swaps.iter().for_each(|s| {
+        router_addresses.insert(s.from);
+        router_addresses.insert(s.to);
+    });
 
+    // Expand swaps by attempting to create additional ones from transfers involving router addresses
+    swaps.extend(self.utils.try_create_swaps(&transfers, router_addresses.clone()));
 
-        let account_deltas = transfers
-            .into_iter()
-            .map(Action::from)
-            .chain(eth_transfers.into_iter().map(Action::from))
-            .chain(info.get_total_eth_value().iter().cloned().map(Action::from))
-            .account_for_actions();
+    // Collect all deltas from transfers and ETH transfers (focus on router interactions)
+    let account_deltas = transfers
+        .into_iter()
+        .map(Action::from)
+        .chain(eth_transfers.into_iter().map(Action::from))
+        .chain(info.get_total_eth_value().iter().cloned().map(Action::from))
+        .account_for_actions();
 
-        let router_addresses: FastHashSet<Address> = info.collect_address_set_for_accounting();
+    // Collect deltas relevant to swaps and router addresses
+    let deltas = account_deltas
+        .into_iter()
+        .filter(|a| a.is_eth_transfer() || a.is_transfer())
+        .account_for_actions();
 
-        let deltas = actions
-            .into_iter()
-            .chain(info.get_total_eth_value().iter().cloned().map(Action::from))
-            .filter(|a| a.is_eth_transfer() || a.is_transfer())
-            .account_for_actions();
+    // Calculate potential revenue and flag if a DEX price is available
+    let (rev, mut has_dex_price) = if let Some(rev) = self.utils.get_deltas_usd(
+        info.tx_index,
+        PriceAt::After,
+        &router_addresses,
+        &deltas,
+        metadata.clone(),
+        false,
+    ) {
+        (Some(rev), true)
+    } else {
+        (Some(Rational::ZERO), false)
+    };
 
-        let (rev, mut has_dex_price) = if let Some(rev) = self.utils.get_deltas_usd(
-            info.tx_index,
-            PriceAt::After,
-            &router_addresses,
-            &deltas,
-            metadata.clone(),
-            false,
-        ) {
-            (Some(rev), true)
-        } else {
-            (Some(Rational::ZERO), false)
-        };
+    // Calculate the gas cost in USD
+    let gas_finalized = metadata.get_gas_price_usd(info.gas_details.gas_paid(), self.utils.quote);
 
-        let gas_finalized =
-            metadata.get_gas_price_usd(info.gas_details.gas_paid(), self.utils.quote);
+    // Compute profit by subtracting gas from revenue
+    let mut profit_usd = rev
+        .map(|rev| rev - &gas_finalized)
+        .filter(|_| has_dex_price)
+        .unwrap_or_default();
 
-        let mut profit_usd = rev
-            .map(|rev| rev - &gas_finalized)
-            .filter(|_| has_dex_price)
-            .unwrap_or_default();
+    // Build the header for the detected snipe event
+    let header = self.utils.build_bundle_header(
+        vec![deltas],
+        vec![info.tx_hash],
+        &info,
+        profit_usd.to_float(),
+        &[info.gas_details],
+        metadata.clone(),
+        MevType::LaunchSnipe,
+        !has_dex_price,
+        |this, token, amount| {
+            this.get_token_value_dex(
+                info.tx_index as usize,
+                PriceAt::Average,
+                token,
+                &amount,
+                &metadata,
+            )
+        },
+    );
 
-        if profit_usd >= MAX_PROFIT || profit_usd <= MIN_PROFIT {
-            has_dex_price = false;
-            profit_usd = Rational::ZERO;
-        }
+    // Construct a new PossibleLaunchSnipe struct (currently placeholders)
+    let new_snipe = PossibleLaunchSnipe {
+        router: info.to_address,  // Assuming router is the 'to' address
+        affected_pool: pool.address,
+        swaps: swaps.iter().map(|s| s.tx_hash).collect(),
+        transfers: transfers.iter().map(|t| t.tx_hash).collect(),
+        // Placeholder: Other fields will depend on specific logic
+    };
 
-        let header = self.utils.build_bundle_header(
-            vec![deltas],
-            vec![info.tx_hash],
-            &info,
-            profit_usd.to_float(),
-            &[info.gas_details],
-            metadata.clone(),
-            MevType::LaunchSnipe,
-            !has_dex_price,
-            |this, token, amount| {
-                this.get_token_value_dex(
-                    info.tx_index as usize,
-                    PriceAt::Average,
-                    token,
-                    &amount,
-                    &metadata,
-                )
-            },
-        );
-
-        let new_snipe = PossibleLaunchSnipe {
-            router: todo!(),
-            affected_pool: todo!(),
-            swaps_in: todo!(),
-            swaps_out: todo!(),
-            victims: todo!(),
-        };
-        Some(Bundle { header, data: BundleData::LaunchSnipe(new_snipe) })
+    // Return the constructed snipe in a Bundle
+    Some(Bundle { header, data: BundleData::LaunchSnipe(new_snipe) })
     }
 }
-

@@ -54,8 +54,7 @@ impl TryFrom<Vec<NormalizedNewPool>> for ClickhouseNormalizedNewPool {
             pool_address: value.iter().map(|val| format!("{:?}", val.pool_address)).collect(),
             tokens: value
                 .iter()
-                .map(|val| val.tokens.iter().map(|t| t.clickhouse_fmt()).collect_vec())
-                .collect(),
+                .map(|t| format!("{:?}", t.tokens)).collect(),
 
             })
         }
